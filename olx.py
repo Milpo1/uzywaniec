@@ -3,12 +3,15 @@ import requests
 import re
 from bs4 import BeautifulSoup
 import csv
-
-page_list =['https://www.olx.pl/elektronika/telefony/smartfony-telefony-komorkowe/iphone/']
+import pandas as pd
+page_list = ['https://www.olx.pl/elektronika/telefony/smartfony-telefony-komorkowe/iphone/']
 models = []
+model_unmatched = 0
+model_names = ('5','5s','5c','6','6s','se2020','se2','se','7','8','x','xr','xs','11','12','13','14')
+model_info = ('pro','max','plus','mini')
 offer_list = []
 start = time.time()
-
+df_offers = pd.DataFrame(offer_list)
 def ask_prompt(text) -> bool:
     if input(text + " Y/n ").lower() == 'y':  
         return True
@@ -44,8 +47,8 @@ def read_web(page_max_count):
                     offer_price_text = re.split(r'[a-zA-Z]', offer_price_text, maxsplit=1)
                     offer_price = float(offer_price_text[0])
                     
-                    offer = [offer_title, offer_url, offer_price, 
-                                offer_price_text[1] if len(offer_price_text) > 1 else '']
+                    offer = {'offer_title':offer_title, 'offer_url':offer_url, 'offer_price':offer_price, 
+                                'offer_price_info' : offer_price_text[1] if len(offer_price_text) > 1 else ''}
                     offer_list.append(offer)
                 except:
                     pass
@@ -53,21 +56,23 @@ def read_web(page_max_count):
     print(f'Zakonczono pobieranie. Pobrałem {len(offer_list)} ofert w ciągu {round(time.time()-start,1)} sekund')
     if ask_prompt("Przetworzyc dane?"):
         process()
-    elif ask_prompt("Zapisac surowe dane?"):  
-        header = ('offer_title','offer_url','offer_price','offer_price_info')
+        if ask_prompt(f"Zapisac dane? \n\t{len(models)} przetworzonych ofert\n\t{model_unmatched} ofert bez modelu\n"):     
+            join_offers_with_models()
+            filename = 'data_processed.csv'
+            save_csv(filename,offer_list)
+    elif ask_prompt("Zapisac surowe dane?"):
         filename = 'data_raw.csv'
-        save_csv(filename,offer_list,header) 
+        save_csv(filename,offer_list) 
 
 def process():
+    global model_unmatched
     models.clear()
     pattern = re.compile(' ')
     to_whitespace = re.compile('[,-]')
     to_remove = re.compile('[^\w\s]')
-    model_names = ('5','5s','5c','6','6s','se2020','se2','se','7','8','x','xr','xs','11','12','13','14')
-    model_info = ('pro','max','plus','mini')
     model_unmatched = 0
     for offer in offer_list:
-        offer_title = offer[0].lower()
+        offer_title = offer['offer_title'].lower()
         offer_title = to_whitespace.sub(' ', offer_title)
         offer_title = to_remove.sub('', offer_title)
         found_str = pattern.split(offer_title)
@@ -86,66 +91,104 @@ def process():
         models.append(product_name[1:])
         if product_name == '':
             model_unmatched+=1
-    # if input("Zaktualizowac liste ofert? Y/n ").lower() == 'y':
-    join_offers_with_models()
-    if ask_prompt(f"Zapisac dane? \n\t{len(models)} przetworzonych ofert\n\t{model_unmatched} ofert bez modelu\n"):     
-        header = ('product_model','offer_title','offer_url','offer_price','offer_price_info')
-        filename = 'data_processed.csv'
-        save_csv(filename,offer_list,header)
-        
+    compile_data_frame()
+      
+def compile_data_frame():
+    global df_offers
+    df_offers = pd.DataFrame(offer_list)
+    df_offers = df_offers.astype({'offer_price':'float'})
+    df_offers = df_offers.astype({'offer_price':'int'})
+  
 def join_offers_with_models():
     for i in range(len(offer_list)):
-        offer_list[i].insert(0,models[i])
+        offer_list[i]['model_name'] = models[i]
     
-def save_csv(filename, list, header):
+def save_csv(filename, list):
     try:
-        with open(filename, 'w', encoding='UTF8') as f:
-            writer = csv.writer(f, lineterminator='\n')
+        keys = list[0].keys()
 
-            # write the header
-            writer.writerow(header)
+        with open(filename, 'w', encoding='UTF8') as output_file:
+            dict_writer = csv.DictWriter(output_file, keys)
+            dict_writer.writeheader()
+            dict_writer.writerows(list)
+            print(f'Zapisano dane do pliku {filename}')
+    except Exception as e:
+        print(f'File error: {filename}\n\t')
+        print(e)
 
-            # write the data
-            writer.writerows(list)
-        print(f'Zapisano dane do pliku {filename}')
-    except:
-        print(f'File error: {filename}')
-
-def load_csv(filename, list):
-    offer_count = 0
+def load_csv(filename):
     try:
-        with open(filename, 'r', encoding='UTF8') as f:
-            reader = csv.reader(f, lineterminator='\n')
-            list.clear()
-            for row in reader:
-                offer_count+=1
-                if offer_count == 1: continue
-                list.append(row)
-        print(f'Zaladowanio plik {filename} do ')
-    except:
-        print(f'File error: {filename}')
+        with open(filename, 'r', encoding='UTF8') as input_file:
+            current_list = []
+            dict_reader = csv.DictReader(input_file)
+            current_list = list(dict_reader)
+            print(f'Zaladowanio plik {filename}')
+            return current_list
+    except Exception as e:
+        print(f'File error: {filename}\n\t')
+        print(e)
         
-def main():
+def analise():
+    if df_offers.empty:
+        compile_data_frame()
     response = ''
     while response != 'exit':
-        response = input("ScrapeIt > ")
-        if re.match('scrap',response):
+        try:
+            response = input('Podaj model: ')
+            response = response.lower()
+            # if response in model_names:
+            model_data = df_offers[df_offers.model_name == response]
+            print(model_data.describe())
+            url = model_data[model_data.offer_price == 950].offer_url
+            print(url.values[0])
+            print(type(url))
+        except:
+            return
+        
+def info(update = False):
+    if update: 
+        process()
+    print(f"\t{len(offer_list)} zaladowanych ofert\n")
+    print(f"\t{len(models)} przetworzonych ofert\n\t{model_unmatched} ofert bez modelu\n")
+
+def main():
+    global offer_list
+    global models
+    global model_unmatched
+    response = ''
+    while response != 'exit':
+        try:
+            response = input("ScrapeIt > ")
+        except:
+            return
+        if re.match('info',response):
+            if re.match('info update',response):
+                info(True)
+                continue
+            info()
+            continue
+        if re.match('scrap', response):
             try:
                 pages = int(response[6:])
             except:
                 pages = 999
             read_web(pages)
             continue
-        if re.match('load_raw',response):
-            load_csv('data_raw.csv', offer_list)
+        if re.match('load_raw', response):
+            offer_list = load_csv('data_raw.csv')
             continue
-        if re.match('load',response):
-            load_csv('data_processed.csv', offer_list)
+        if re.match('load', response):
+            offer_list = load_csv('data_processed.csv')
             continue       
-        if re.match('process',response):
+        if re.match('process', response):
             process()
+            continue
+        if re.match('analise', response):
+            analise()
             continue
 
 if __name__ == "__main__":
+    offer_list = load_csv('data_processed.csv')
+    analise()
     main()
     
