@@ -7,8 +7,10 @@ import pandas as pd
 page_list = ['https://www.olx.pl/elektronika/telefony/smartfony-telefony-komorkowe/iphone/']
 models = []
 model_unmatched = 0
+model_keyword = 'iphone'
 model_names = ('5','5s','5c','6','6s','se2020','se2','se','7','8','x','xr','xs','11','12','13','14')
-model_info = ('pro','max','plus','mini')
+model_info = (('pro', '#'),('max', '#'),('plus', '#'),('mini', '#'))
+model_extrainfo = (('16gb','16'),('32gb','32'),('64gb','64'),('128gb','128'),('256gb','256'),('512gb','512'),('1tb','#'))
 offer_list = []
 start = time.time()
 df_offers = pd.DataFrame(offer_list)
@@ -68,7 +70,7 @@ def process():
     global model_unmatched
     models.clear()
     pattern = re.compile(' ')
-    to_whitespace = re.compile('[,-]')
+    to_whitespace = re.compile('[,-/]')
     to_remove = re.compile('[^\w\s]')
     model_unmatched = 0
     for offer in offer_list:
@@ -76,21 +78,33 @@ def process():
         offer_title = to_whitespace.sub(' ', offer_title)
         offer_title = to_remove.sub('', offer_title)
         found_str = pattern.split(offer_title)
-        product_name = ''
-        temp_product_name = ''
+        model_name = ''
+        model_details = ''
         for i in range(len(found_str)):
-            if found_str[i] == 'iphone':
-                temp_product_name = found_str[i:i+4]
-        for model in model_names:
-            if model in temp_product_name:
-                product_name += ' '+model
+            if found_str[i] == model_keyword:
+                model_name += model_keyword
                 break
-        for info in model_info:
-            if info in temp_product_name:
-                product_name += ' '+info
-        models.append(product_name[1:])
-        if product_name == '':
+        if model_name != '':
+            for model in model_names:
+                if model in found_str:
+                    model_name += ' ' + model
+                    break
+            for info in model_info:
+                for synonim in info:
+                    if synonim in found_str:
+                        model_name += ' ' + info[0]
+                        break
+            for details in model_extrainfo:
+                for detail in details:
+                    if detail in found_str:
+                        model_details += ' ' + details[0]
+                        break           
+        if model_name == model_keyword:
+            model_name = 'NA'
             model_unmatched+=1
+        if model_details == '':
+            model_details = ' NA'
+        models.append((model_name, model_details[1:]))
     compile_data_frame()
       
 def compile_data_frame():
@@ -101,7 +115,8 @@ def compile_data_frame():
   
 def join_offers_with_models():
     for i in range(len(offer_list)):
-        offer_list[i]['model_name'] = models[i]
+        offer_list[i]['model_name'] = models[i][0]
+        offer_list[i]['model_details'] = models[i][1]
     
 def save_csv(filename, list):
     try:
@@ -180,8 +195,16 @@ def main():
         if re.match('load', response):
             offer_list = load_csv('data_processed.csv')
             continue       
+        if re.match('save', response):
+            if len(models) > 0:
+                save_csv('data_processed.csv', offer_list)
+            continue    
         if re.match('process', response):
             process()
+            if ask_prompt(f"Zapisac dane? \n\t{len(models)} przetworzonych ofert\n\t{model_unmatched} ofert bez modelu\n"):     
+                join_offers_with_models()
+                filename = 'data_processed.csv'
+                save_csv(filename, offer_list)
             continue
         if re.match('analise', response):
             analise()
