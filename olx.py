@@ -4,27 +4,46 @@ import re
 from bs4 import BeautifulSoup
 import csv
 import pandas as pd
-page_list = ['https://www.olx.pl/elektronika/telefony/smartfony-telefony-komorkowe/iphone/']
+
+main_page_url = 'https://www.olx.pl'
+page_list_url = 'https://www.olx.pl/elektronika/telefony/smartfony-telefony-komorkowe/iphone/'
 models = []
+model_recognised = 0
+model_unrecognised = 0
 model_unmatched = 0
-model_keyword = 'iphone'
-model_names = ('5','5s','5c','6','6s','se2020','se2','se','7','8','x','xr','xs','11','12','13','14')
-model_info = (('pro', '#'),('max', '#'),('plus', '#'),('mini', '#'))
-model_extrainfo = (('16gb','16'),('32gb','32'),('64gb','64'),('128gb','128'),('256gb','256'),('512gb','512'),('1tb','#'))
+model_keyword = ['iphone','iphon','iphony','phone','ip']
+model_names = ['3','3g','4','4s','5','5s','5c','6','6s','se2020','se2','se','7','8','x','xr','xs','11','12','13','14']
+model_info = [['pro'],['max'],['plus'],['mini']]
+model_extrainfo = [['16gb','16'], ['32gb','32'], ['64gb','64'], ['128gb','128'], ['256gb','256'], ['512gb','512'], ['1tb']]
 offer_list = []
 start = time.time()
 df_offers = pd.DataFrame(offer_list)
+
+def help():
+    print("\n-UZYWANIEC 1.0-------------POMOC---------------------------")
+    print("Uzywaniec pozwoli Ci zebrac dane ofert z serwisu OLX")
+    print("i skomponowac na ich podstawie baze danych interesujacych Cie ofert.\nObsluguje pliki csv.\n")
+    print("help - jestes tutaj")
+    print("scrape [n] - scrapuj n stron z ofertami (jesli brak, max) (zapyta o przetworzenie)")
+    print("process - przetworz obecnie wczytane oferty")
+    print("analise - analiza wczytanych ofert")
+    print("print [n] - wypisuje n-ty wiersz bazy ofert")
+    print("load_raw - wczytaj plik z surowymi danymi (data_raw.csv)")
+    print("load - wczytaj plik z przetworzonymi danymi (data_processed.csv)")
+    print("info - wypisuje stan obecnych danych")
+    print("config - wypisuje obecna konfiguracje przetwarzania\n")
+    
 def ask_prompt(text) -> bool:
     if input(text + " Y/n ").lower() == 'y':  
         return True
     return False
 
-def read_web(page_max_count):
+def read_olx(page_max_count):
     offer_list.clear()
     for page_count in range(1,page_max_count+1):
         print(f'Przechodze do strony {page_count}. Pobrano razem {len(offer_list)} ofert.')
         page_prompt = f'page={page_count}'
-        page_url = page_list[0]+f'?'+page_prompt+'&search[order]=created_at%3Adesc'
+        page_url = page_list_url+f'?'+page_prompt+'&search[order]=created_at%3Adesc'
         page = requests.get(page_url)
         
         if not re.search(page_prompt,page.url) and page_count > 1:
@@ -34,14 +53,18 @@ def read_web(page_max_count):
         for a in soup.find_all('a', href=True):
             if a['href'][0:9]=='/d/oferta':
                 try:
+                    # Omit featured offers
                     if a.find('div', attrs={'data-testid':'adCard-featured'}):
                         continue
                     
+                    # Offer title
                     offer_title_h6 = a.find('h6')
                     offer_title = offer_title_h6.text
                     
+                    # Offer url
                     offer_url = a['href']
                     
+                    # Offer price scrapin
                     offer_price_p = a.find('p')
                     offer_price_text = re.sub(' zł','',offer_price_p.text)
                     offer_price_text = re.sub(' ','',offer_price_text)
@@ -49,8 +72,21 @@ def read_web(page_max_count):
                     offer_price_text = re.split(r'[a-zA-Z]', offer_price_text, maxsplit=1)
                     offer_price = float(offer_price_text[0])
                     
-                    offer = {'offer_title':offer_title, 'offer_url':offer_url, 'offer_price':offer_price, 
-                                'offer_price_info' : offer_price_text[1] if len(offer_price_text) > 1 else ''}
+                    # Detect OLX delivery
+                    offer_delivery = 0
+                    if offer_price_p.find('svg'):
+                        offer_delivery = 1
+                    
+                    # Offer completing
+                    offer = {'offer_title':offer_title, 'offer_url': main_page_url + offer_url, 'offer_price':offer_price, 
+                                'offer_price_info' : offer_price_text[1] if len(offer_price_text) > 1 else 'NA',
+                                'offer_status' : 'active', 'model_name' : 'NA', 'model_details' : 'NA',
+                                'olx_delivery' : offer_delivery, 'creation_date' : 'NA', 'item_condition' : 'NA',
+                                'offer_location' : 'NA', 'seller_type' : 'NA', 'seller_name' : 'NA',
+                                'view_count' : 'NA', 'offer_id' : 'NA', 'uzywaniec_count' : '0'
+                            }
+                    
+                    # Append offer to offer list
                     offer_list.append(offer)
                 except:
                     pass
@@ -60,52 +96,81 @@ def read_web(page_max_count):
         process()
         if ask_prompt(f"Zapisac dane? \n\t{len(models)} przetworzonych ofert\n\t{model_unmatched} ofert bez modelu\n"):     
             join_offers_with_models()
+            compile_data_frame()
             filename = 'data_processed.csv'
             save_csv(filename,offer_list)
     elif ask_prompt("Zapisac surowe dane?"):
         filename = 'data_raw.csv'
         save_csv(filename,offer_list) 
 
-def process():
+def refresh_offer(offer):
+    offer_url = offer['offer_url']
+    offer = requests.get(offer_url)
+    
+def process(offer_list):
     global model_unmatched
+    global model_unrecognised
+    global model_recognised
     models.clear()
     pattern = re.compile(' ')
-    to_whitespace = re.compile('[,-/]')
+    to_whitespace = re.compile('[\',-/]')
     to_remove = re.compile('[^\w\s]')
     model_unmatched = 0
     for offer in offer_list:
         offer_title = offer['offer_title'].lower()
         offer_title = to_whitespace.sub(' ', offer_title)
         offer_title = to_remove.sub('', offer_title)
+        
+        # Separate keyword and model detail phrases (ex. "iiphone7promax" -> "i iphone 7 pro max ")
+        offer_title = re.sub(model_keyword[0],f' {model_keyword[0]} ',offer_title)
+        for info in model_info:
+            offer_title = re.sub(info[0],f' {info[0]} ',offer_title)
         found_str = pattern.split(offer_title)
         model_name = ''
         model_details = ''
+        # Look for keyword
         for i in range(len(found_str)):
-            if found_str[i] == model_keyword:
-                model_name += model_keyword
+            for keyword in model_keyword:
+                if found_str[i] == keyword:
+                    model_name += model_keyword[0]
+                    break
+            if model_name != '': 
                 break
+        
+        # Proceed if keyword phrase is found
         if model_name != '':
+            # Look for model name
             for model in model_names:
                 if model in found_str:
                     model_name += ' ' + model
                     break
+            # Look for model info
             for info in model_info:
                 for synonim in info:
                     if synonim in found_str:
                         model_name += ' ' + info[0]
                         break
+            # Look for model info details
             for details in model_extrainfo:
                 for detail in details:
                     if detail in found_str:
                         model_details += ' ' + details[0]
-                        break           
-        if model_name == model_keyword:
+                        break   
+        # Fill with NA's and update counters
+        if model_name == '':
+            model_name = 'NA'
+            model_unrecognised+=1
+        elif model_name == model_keyword[0]:
             model_name = 'NA'
             model_unmatched+=1
+        else:
+            model_recognised+=1
+            
         if model_details == '':
             model_details = ' NA'
+        
+        # Add to model list
         models.append((model_name, model_details[1:]))
-    compile_data_frame()
       
 def compile_data_frame():
     global df_offers
@@ -118,14 +183,14 @@ def join_offers_with_models():
         offer_list[i]['model_name'] = models[i][0]
         offer_list[i]['model_details'] = models[i][1]
     
-def save_csv(filename, list):
+def save_csv(filename, dict_list):
     try:
-        keys = list[0].keys()
+        keys = dict_list[0].keys()
 
         with open(filename, 'w', encoding='UTF8') as output_file:
             dict_writer = csv.DictWriter(output_file, keys)
             dict_writer.writeheader()
-            dict_writer.writerows(list)
+            dict_writer.writerows(dict_list)
             print(f'Zapisano dane do pliku {filename}')
     except Exception as e:
         print(f'File error: {filename}\n\t')
@@ -154,9 +219,6 @@ def analise():
             # if response in model_names:
             model_data = df_offers[df_offers.model_name == response]
             print(model_data.describe())
-            url = model_data[model_data.offer_price == 950].offer_url
-            print(url.values[0])
-            print(type(url))
         except:
             return
         
@@ -164,7 +226,13 @@ def info(update = False):
     if update: 
         process()
     print(f"\t{len(offer_list)} zaladowanych ofert\n")
-    print(f"\t{len(models)} przetworzonych ofert\n\t{model_unmatched} ofert bez modelu\n")
+    print(f"\t{model_recognised} rozpoznanych ofert\n\t{model_unmatched} ofert bez modelu\n\t{model_unrecognised} ofert nierozpoznanych")
+    
+def config_info():
+    print(f"model_keyword: {model_keyword}\nmodel_names: {model_names}\nmodel_info: {model_info}\nmodel_extrainfo: {model_extrainfo}")
+
+def print_row(row_index):
+    print(offer_list[row_index])
 
 def main():
     global offer_list
@@ -173,9 +241,22 @@ def main():
     response = ''
     while response != 'exit':
         try:
-            response = input("ScrapeIt > ")
+            response = input("$ Uzywaniec > ")
         except:
             return
+        if re.match('help',response):
+            help()
+            continue
+        if re.match('print',response):
+            try:
+                index = int(response[6:])-1
+                print_row(index)      
+            except Exception as e:
+                print(e)
+            continue
+        if re.match('config',response):
+            config_info()
+            continue        
         if re.match('info',response):
             if re.match('info update',response):
                 info(True)
@@ -187,7 +268,7 @@ def main():
                 pages = int(response[6:])
             except:
                 pages = 999
-            read_web(pages)
+            read_olx(pages)
             continue
         if re.match('load_raw', response):
             offer_list = load_csv('data_raw.csv')
@@ -200,9 +281,22 @@ def main():
                 save_csv('data_processed.csv', offer_list)
             continue    
         if re.match('process', response):
-            process()
-            if ask_prompt(f"Zapisac dane? \n\t{len(models)} przetworzonych ofert\n\t{model_unmatched} ofert bez modelu\n"):     
+            # try:
+            #     row = int(response[8:])
+
+            #     print(f'Processing row {row}...')
+            #     offer_index = row-1
+            #     process([offer_list[offer_index]])
+            #     print(f'Row {row} processed successfully')
+            #     continue
+            # except Exception as e:
+            #     print(e)
+            
+            process(offer_list)
+            info()
+            if ask_prompt(f"Zapisac dane?"):     
                 join_offers_with_models()
+                compile_data_frame()
                 filename = 'data_processed.csv'
                 save_csv(filename, offer_list)
             continue
@@ -212,6 +306,6 @@ def main():
 
 if __name__ == "__main__":
     offer_list = load_csv('data_processed.csv')
-    analise()
+    # analise()
     main()
     

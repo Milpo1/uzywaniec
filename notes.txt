@@ -1,0 +1,15 @@
+uzywaniec.pl
+- zbieranie danych o nowych ofertach olx
+	- czeste scrapowanie listy ofert (raz na dzien ?)
+	- zapisywanie unikalnych ofert (po url?)
+	- przetwarzanie oferty
+		odczytanie modelu, ceny, data dodania, 
+		lokalizacja, przesylka olx, imie, stan
+	
+- sledzenie kazdej oferty 
+	- sprawdzanie czy sie sprzedala (co pol godziny?/dzien?)
+		w razie stwierdzenia sprzedazy zapisac date i przeniesc do
+		bazy ofert zakonczonych
+	- sledzenie ceny
+		aktualizowanie ceny do bazy danych
+	- 
