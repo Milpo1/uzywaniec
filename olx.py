@@ -6,21 +6,36 @@ import csv
 import pandas as pd
 
 main_page_url = 'https://www.olx.pl'
-page_list_url = 'https://www.olx.pl/elektronika/telefony/smartfony-telefony-komorkowe/iphone/'
+# page_list_url = 'https://www.olx.pl/elektronika/telefony/smartfony-telefony-komorkowe/iphone/'
+page_list_url = 'https://www.olx.pl/elektronika/komputery/podzespoly-i-czesci/karty-graficzne/'
+
+# omit_keyword_search = False
+# model_keyword = ['iphone','iphon','iphony','phone','ip']
+# model_names = ['3','3g','4','4s','5','5s','5c','6','6s','se2020','se2','se','7','8','x','xr','xs','11','12','13','14']
+# model_info = [['pro'],['max'],['plus'],['mini']]
+# model_extrainfo = [['16gb','16'], ['32gb','32'], ['64gb','64'], ['128gb','128'], ['256gb','256'], ['512gb','512'], ['1tb']]
+
+omit_keyword_search = True
+model_keyword = ['gpu','gtx','rtx']
+model_names = ['1050','1060','1070','1080',
+               '1660','2060','2070','2080',
+               '3060','3070','3080','3090',
+               '4060','4070','4080','4090'
+                ]
+model_info = [['ti'],['super']]
+model_extrainfo = [['2gb','2'], ['3gb','3'], ['4gb','4'], ['6gb','6'], ['8gb','8'], ['12gb','12'], ['16gb','16'], ['32gb','32']]
+
+curse_words = []
+offer_list = []
 models = []
 model_recognised = 0
-model_unrecognised = 0
-model_unmatched = 0
-model_keyword = ['iphone','iphon','iphony','phone','ip']
-model_names = ['3','3g','4','4s','5','5s','5c','6','6s','se2020','se2','se','7','8','x','xr','xs','11','12','13','14']
-model_info = [['pro'],['max'],['plus'],['mini']]
-model_extrainfo = [['16gb','16'], ['32gb','32'], ['64gb','64'], ['128gb','128'], ['256gb','256'], ['512gb','512'], ['1tb']]
-offer_list = []
+model_unrecognised = []
+model_unmatched = []
 start = time.time()
 df_offers = pd.DataFrame(offer_list)
 
 def help():
-    print("\n-UZYWANIEC 1.0-------------POMOC---------------------------")
+    print("\n---------------------------POMOC---------------------------")
     print("Uzywaniec pozwoli Ci zebrac dane ofert z serwisu OLX")
     print("i skomponowac na ich podstawie baze danych interesujacych Cie ofert.\nObsluguje pliki csv.\n")
     print("help - jestes tutaj")
@@ -28,6 +43,7 @@ def help():
     print("process - przetworz obecnie wczytane oferty")
     print("analise - analiza wczytanych ofert")
     print("print [n] - wypisuje n-ty wiersz bazy ofert")
+    print("\tprint unmatched\n\tprint unrec")
     print("load_raw - wczytaj plik z surowymi danymi (data_raw.csv)")
     print("load - wczytaj plik z przetworzonymi danymi (data_processed.csv)")
     print("info - wypisuje stan obecnych danych")
@@ -77,11 +93,19 @@ def read_olx(page_max_count):
                     if offer_price_p.find('svg'):
                         offer_delivery = 1
                     
+                    item_condition = 'NA'
+                    if a.find('span', attrs={'title':'Używane'}):
+                        item_condition = 'used'
+                    elif a.find('span', attrs={'title':'Nowe'}):
+                        item_condition = 'new'
+                    elif a.find('span', attrs={'title':'Uszkodzone'}):
+                        item_condition = 'broken'
+                    
                     # Offer completing
-                    offer = {'offer_title':offer_title, 'offer_url': main_page_url + offer_url, 'offer_price':offer_price, 
-                                'offer_price_info' : offer_price_text[1] if len(offer_price_text) > 1 else 'NA',
+                    offer = {   'id' : len(offer_list)+1, 'offer_title':offer_title, 'offer_url': main_page_url + offer_url, 
+                                'offer_price':offer_price, 'offer_price_info' : offer_price_text[1] if len(offer_price_text) > 1 else 'NA',
                                 'offer_status' : 'active', 'model_name' : 'NA', 'model_details' : 'NA',
-                                'olx_delivery' : offer_delivery, 'creation_date' : 'NA', 'item_condition' : 'NA',
+                                'olx_delivery' : offer_delivery, 'creation_date' : 'NA', 'item_condition' : item_condition,
                                 'offer_location' : 'NA', 'seller_type' : 'NA', 'seller_name' : 'NA',
                                 'view_count' : 'NA', 'offer_id' : 'NA', 'uzywaniec_count' : '0'
                             }
@@ -92,31 +116,28 @@ def read_olx(page_max_count):
                     pass
     
     print(f'Zakonczono pobieranie. Pobrałem {len(offer_list)} ofert w ciągu {round(time.time()-start,1)} sekund')
-    if ask_prompt("Przetworzyc dane?"):
-        process()
-        if ask_prompt(f"Zapisac dane? \n\t{len(models)} przetworzonych ofert\n\t{model_unmatched} ofert bez modelu\n"):     
-            join_offers_with_models()
-            compile_data_frame()
-            filename = 'data_processed.csv'
-            save_csv(filename,offer_list)
-    elif ask_prompt("Zapisac surowe dane?"):
+    if ask_prompt("Zapisac surowe dane?"):
         filename = 'data_raw.csv'
         save_csv(filename,offer_list) 
+    if ask_prompt("Przetworzyc dane?"):
+        process(offer_list)
 
 def refresh_offer(offer):
     offer_url = offer['offer_url']
     offer = requests.get(offer_url)
     
-def process(offer_list):
+def process(offer_list_requested):
     global model_unmatched
     global model_unrecognised
     global model_recognised
+    model_unmatched.clear()
+    model_unrecognised.clear()
+    model_recognised = 0
     models.clear()
     pattern = re.compile(' ')
     to_whitespace = re.compile('[\',-/]')
     to_remove = re.compile('[^\w\s]')
-    model_unmatched = 0
-    for offer in offer_list:
+    for offer in offer_list_requested:
         offer_title = offer['offer_title'].lower()
         offer_title = to_whitespace.sub(' ', offer_title)
         offer_title = to_remove.sub('', offer_title)
@@ -128,10 +149,11 @@ def process(offer_list):
         found_str = pattern.split(offer_title)
         model_name = ''
         model_details = ''
+        
         # Look for keyword
         for i in range(len(found_str)):
             for keyword in model_keyword:
-                if found_str[i] == keyword:
+                if found_str[i] == keyword or omit_keyword_search:
                     model_name += model_keyword[0]
                     break
             if model_name != '': 
@@ -144,25 +166,35 @@ def process(offer_list):
                 if model in found_str:
                     model_name += ' ' + model
                     break
-            # Look for model info
-            for info in model_info:
-                for synonim in info:
-                    if synonim in found_str:
-                        model_name += ' ' + info[0]
-                        break
-            # Look for model info details
-            for details in model_extrainfo:
-                for detail in details:
-                    if detail in found_str:
-                        model_details += ' ' + details[0]
-                        break   
+            # Proceed if model name found:
+            if model_name != model_keyword[0]:
+                # Look for model info 
+                for info in model_info:
+                    for synonim in info:
+                        if synonim in found_str:
+                            model_name += ' ' + info[0]
+                            break
+                # Look for model info details
+                for details in model_extrainfo:
+                    for detail in details:
+                        if detail in found_str:
+                            model_details += ' ' + details[0]
+                            break   
+                 
+        # Mark offer as unrecognised if curse word found   
+        found_curse_words = None
+        for curse_word in curse_words:
+            found_curse_words = re.search(curse_word,offer_title)
+            if not found_curse_words is None:
+                break
+        
         # Fill with NA's and update counters
-        if model_name == '':
+        if model_name == '' or not found_curse_words is None:
             model_name = 'NA'
-            model_unrecognised+=1
+            model_unrecognised.append(offer)
         elif model_name == model_keyword[0]:
             model_name = 'NA'
-            model_unmatched+=1
+            model_unmatched.append(offer)
         else:
             model_recognised+=1
             
@@ -171,6 +203,13 @@ def process(offer_list):
         
         # Add to model list
         models.append((model_name, model_details[1:]))
+    if len(models) == len(offer_list):
+        join_offers_with_models()
+        compile_data_frame()
+        print_info()
+        if ask_prompt(f"Zapisac dane?"):     
+            filename = 'data_processed.csv'
+            save_csv(filename, offer_list)
       
 def compile_data_frame():
     global df_offers
@@ -202,7 +241,7 @@ def load_csv(filename):
             current_list = []
             dict_reader = csv.DictReader(input_file)
             current_list = list(dict_reader)
-            print(f'Zaladowanio plik {filename}')
+            print(f'Zaladowano plik {filename}')
             return current_list
     except Exception as e:
         print(f'File error: {filename}\n\t')
@@ -222,17 +261,20 @@ def analise():
         except:
             return
         
-def info(update = False):
+def print_info(update = False):
     if update: 
         process()
-    print(f"\t{len(offer_list)} zaladowanych ofert\n")
-    print(f"\t{model_recognised} rozpoznanych ofert\n\t{model_unmatched} ofert bez modelu\n\t{model_unrecognised} ofert nierozpoznanych")
+    print(f"Podsumowanie:")
+    print(f"\t{len(offer_list)} zaladowanych ofert")
+    print(f"\t{model_recognised} rozpoznanych ofert\n\t{len(model_unmatched)} ofert bez modelu\n\t{len(model_unrecognised)} ofert nierozpoznanych")
     
 def config_info():
+    print(f"main_page_url: {main_page_url}\npage_list_url: {page_list_url}")
     print(f"model_keyword: {model_keyword}\nmodel_names: {model_names}\nmodel_info: {model_info}\nmodel_extrainfo: {model_extrainfo}")
 
-def print_row(row_index):
-    print(offer_list[row_index])
+def print_row(offer_list):
+    for offer in offer_list:
+        print(f'{offer}\n')
 
 def main():
     global offer_list
@@ -244,24 +286,31 @@ def main():
             response = input("$ Uzywaniec > ")
         except:
             return
-        if re.match('help',response):
+        if re.match('help', response):
             help()
             continue
-        if re.match('print',response):
+        if re.match('print', response):
+            if re.match('print unmatched', response):
+                print_row(model_unmatched) 
+                continue
+            if re.match('print unrec', response):
+                print_row(model_unrecognised) 
+                continue            
             try:
                 index = int(response[6:])-1
-                print_row(index)      
+                offer = offer_list[index]
+                print_row([offer])      
             except Exception as e:
                 print(e)
             continue
-        if re.match('config',response):
+        if re.match('config', response):
             config_info()
             continue        
-        if re.match('info',response):
-            if re.match('info update',response):
-                info(True)
+        if re.match('info', response):
+            if re.match('info update', response):
+                print_info(True)
                 continue
-            info()
+            print_info()
             continue
         if re.match('scrap', response):
             try:
@@ -281,24 +330,17 @@ def main():
                 save_csv('data_processed.csv', offer_list)
             continue    
         if re.match('process', response):
-            # try:
-            #     row = int(response[8:])
+            try:
+                row = int(response[8:])
 
-            #     print(f'Processing row {row}...')
-            #     offer_index = row-1
-            #     process([offer_list[offer_index]])
-            #     print(f'Row {row} processed successfully')
-            #     continue
-            # except Exception as e:
-            #     print(e)
-            
+                print(f'Processing row {row}...')
+                offer_index = row-1
+                process([offer_list[offer_index]])
+                print(f'Row {row} processed successfully')
+                continue
+            except:
+                pass
             process(offer_list)
-            info()
-            if ask_prompt(f"Zapisac dane?"):     
-                join_offers_with_models()
-                compile_data_frame()
-                filename = 'data_processed.csv'
-                save_csv(filename, offer_list)
             continue
         if re.match('analise', response):
             analise()

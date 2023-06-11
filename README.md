@@ -1,4 +1,4 @@
-# ---UŻYWANIEC 1.0---
+# ---UŻYWANIEC---
   Używaniec pozwoli Ci zebrać dane ofert z serwisu OLX i skomponować na ich podstawie bazę danych interęsujacych Cię ofert. Obsluguje pliki csv.
 # Polecenia
   - help - wyświetl pomoc
