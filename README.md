@@ -13,7 +13,7 @@
   - load - wczytaj plik z przetworzonymi danymi (data_processed.csv)
   - info - wypisuje stan obecnych danych
   - config - wypisuje obecną konfigurację przetwarzania
-  - 
+
 # Przykład konfiguracji
 
 ```python
